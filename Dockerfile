@@ -1,5 +1,5 @@
 # Utiliser une image Node.js officielle comme base
-FROM node:18
+FROM node:18 AS builder
 
 # Définir le répertoire de travail dans le conteneur
 WORKDIR /app
@@ -7,11 +7,28 @@ WORKDIR /app
 # Copier les fichiers package.json et package-lock.json
 COPY package*.json ./
 
-# Installer les dépendances
+# Installer toutes les dépendances (y compris devDependencies)
 RUN npm install
 
-# Copier le reste des fichiers de l'application
+# Copier les fichiers source
 COPY . .
+
+# Compiler TypeScript
+RUN npx tsc
+
+# Créer l'image finale
+FROM node:18-slim
+
+WORKDIR /app
+
+# Copier package.json et package-lock.json
+COPY package*.json ./
+
+# Installer uniquement les dépendances de production
+RUN npm install --production
+
+# Copier les fichiers compilés et les ressources nécessaires
+COPY --from=builder /app/dist ./dist
 
 # Créer un répertoire pour les données SQLite
 RUN mkdir -p /app/data

@@ -1,0 +1,57 @@
+### Vérifier les capacités du serveur
+GET http://localhost:3000/capabilities
+
+### Sauvegarder un contexte avec métadonnées
+POST http://localhost:3000/context
+Content-Type: application/json
+
+{
+  "key": "exampleKey",
+  "value": "exampleValue",
+  "metadata": {
+    "type": "configuration",
+    "timestamp": "2025-04-20T12:00:00Z",
+    "source": "test"
+  }
+}
+
+### Opération batch
+POST http://localhost:3000/context/batch
+Content-Type: application/json
+
+[
+  {
+    "key": "batch1",
+    "value": "value1",
+    "metadata": {
+      "type": "test",
+      "timestamp": "2025-04-20T12:00:00Z"
+    }
+  },
+  {
+    "key": "batch2",
+    "value": "value2",
+    "metadata": {
+      "type": "test",
+      "timestamp": "2025-04-20T12:00:00Z"
+    }
+  }
+]
+
+### Récupérer un contexte
+GET http://localhost:3000/context/exampleKey
+
+### Mettre à jour un contexte existant
+POST http://localhost:3000/context
+Content-Type: application/json
+
+{
+  "key": "exampleKey",
+  "value": "nouvelleValeur"
+}
+
+### Vérifier la mise à jour
+GET http://localhost:3000/context/exampleKey
+
+### Tester une clé inexistante
+GET http://localhost:3000/context/cleInexistante

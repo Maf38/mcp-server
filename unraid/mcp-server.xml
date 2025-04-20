@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>mcp-server</Name>
+  <Repository>your-dockerhub-username/mcp-server</Repository>
+  <Registry>https://hub.docker.com/r/your-dockerhub-username/mcp-server</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/your-username/mcp-server</Support>
+  <Project>https://github.com/your-username/mcp-server</Project>
+  <Overview>Serveur MCP (Model Context Protocol) - Un serveur de gestion de contexte basé sur SQLite.</Overview>
+  <Category>Tools:</Category>
+  <WebUI>http://[IP]:[PORT:3000]</WebUI>
+  <TemplateURL/>
+  <Icon>https://raw.githubusercontent.com/your-username/mcp-server/main/unraid/icon.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DonateText/>
+  <DonateLink/>
+  <Config Name="WebUI" Target="3000" Default="3000" Mode="tcp" Description="Port d'accès à l'API" Type="Port" Display="always" Required="true" Mask="false"/>
+  <Config Name="Chemin des données" Target="/app/data" Default="/mnt/user/appdata/mcp-server" Mode="rw" Description="Emplacement de stockage des données" Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="Port" Target="PORT" Default="3000" Mode="" Description="Port d'écoute du serveur" Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="Chemin DB" Target="DB_PATH" Default="/app/data/context.db" Mode="" Description="Chemin de la base de données SQLite" Type="Variable" Display="advanced" Required="false" Mask="false"/>
+</Container>
