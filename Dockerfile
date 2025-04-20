@@ -19,6 +19,10 @@ RUN npx tsc
 # Créer l'image finale
 FROM node:18-slim
 
+# Configuration des logs pour Docker
+ENV NODE_OPTIONS="--enable-source-maps"
+ENV NPM_CONFIG_LOGLEVEL="info"
+
 WORKDIR /app
 
 # Copier package.json et package-lock.json
@@ -36,5 +40,6 @@ RUN mkdir -p /app/data
 # Exposer le port 3000
 EXPOSE 3000
 
-# Démarrer l'application
-CMD ["npm", "start"]
+# Démarrer l'application avec le mode de logs non bufferisé
+ENV NODE_ENV=production
+CMD ["node", "--unhandled-rejections=strict", "dist/index.js"]

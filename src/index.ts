@@ -31,14 +31,17 @@ app.get('/capabilities', getCapabilities);
 
 // Route pour sauvegarder le contexte
 app.post('/context', async (req: Request, res: Response) => {
+  console.log('[MCP Server] POST /context - Nouvelle requête reçue:', req.body.key);
   try {
     const validatedData = contextSchema.parse(req.body);
     const { key, value, metadata } = validatedData;
+    console.log(`[MCP Server] Sauvegarde du contexte - Clé: ${key}`);
 
     await db.run(
       'INSERT OR REPLACE INTO context (key, value, metadata) VALUES (?, ?, ?)',
       [key, value, JSON.stringify(metadata || {})]
     );
+    console.log(`[MCP Server] Contexte sauvegardé avec succès - Clé: ${key}`);
     
     res.status(201).json({ 
       message: 'Context saved successfully',
@@ -46,9 +49,10 @@ app.post('/context', async (req: Request, res: Response) => {
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
+      console.error('[MCP Server] Erreur de validation:', error.errors);
       res.status(400).json({ error: 'Validation error', details: error.errors });
     } else {
-      console.error('Database error:', error);
+      console.error('[MCP Server] Erreur de base de données:', error);
       res.status(500).json({ error: 'Failed to save context' });
     }
   }
@@ -56,25 +60,30 @@ app.post('/context', async (req: Request, res: Response) => {
 
 // Route pour les opérations batch
 app.post('/context/batch', async (req: Request, res: Response) => {
+  console.log('[MCP Server] POST /context/batch - Nouvelle requête batch reçue');
   try {
     const batch = batchRequestSchema.parse(req.body);
+    console.log(`[MCP Server] Traitement batch - ${batch.length} éléments`);
     
     const results = [];
     await db.run('BEGIN TRANSACTION');
     
     for (const item of batch) {
       try {
+        console.log(`[MCP Server] Traitement élément batch - Clé: ${item.key}`);
         await db.run(
           'INSERT OR REPLACE INTO context (key, value, metadata) VALUES (?, ?, ?)',
           [item.key, item.value, JSON.stringify(item.metadata || {})]
         );
         results.push({ key: item.key, status: 'success' });
       } catch (error) {
+        console.error(`[MCP Server] Erreur pour la clé ${item.key}:`, error);
         results.push({ key: item.key, status: 'error', error: String(error) });
       }
     }
     
     await db.run('COMMIT');
+    console.log('[MCP Server] Opération batch terminée avec succès');
     res.json({ results });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -88,11 +97,13 @@ app.post('/context/batch', async (req: Request, res: Response) => {
 
 // Route pour récupérer le contexte
 app.get('/context/:key', async (req: Request, res: Response) => {
+  const { key } = req.params;
+  console.log(`[MCP Server] GET /context/${key} - Récupération de contexte`);
   try {
-    const { key } = req.params;
     const result = await db.get('SELECT value, metadata FROM context WHERE key = ?', [key]);
     
     if (result) {
+      console.log(`[MCP Server] Contexte trouvé - Clé: ${key}`);
       const metadata = JSON.parse(result.metadata || '{}');
       res.json({ 
         key, 
@@ -100,10 +111,11 @@ app.get('/context/:key', async (req: Request, res: Response) => {
         metadata
       });
     } else {
+      console.log(`[MCP Server] Contexte non trouvé - Clé: ${key}`);
       res.status(404).json({ error: 'Context not found' });
     }
   } catch (error) {
-    console.error('Database error:', error);
+    console.error('[MCP Server] Erreur lors de la récupération:', error);
     res.status(500).json({ error: 'Failed to retrieve context' });
   }
 });
@@ -131,14 +143,18 @@ app.get('/health', healthCheck);
 // Initialisation du serveur
 export async function initServer(testDb?: Database) {
   try {
+    console.log('[MCP Server] Démarrage du serveur...');
     if (testDb) {
+      console.log('[MCP Server] Utilisation de la base de test');
       db = testDb;
     } else {
+      console.log(`[MCP Server] Initialisation de la base de données: ${DB_PATH}`);
       db = await initializeDatabase(DB_PATH);
     }
+    console.log('[MCP Server] Base de données initialisée avec succès');
     return app;
   } catch (error) {
-    console.error('Failed to initialize database:', error);
+    console.error('[MCP Server] Erreur lors de l\'initialisation de la base de données:', error);
     throw error;
   }
 };
