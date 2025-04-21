@@ -27,7 +27,8 @@ Content-Type: application/json
       "timestamp": "2025-04-21T12:00:00Z",
       "source": "http-client"
     }
-  }
+  },
+  "id": "create-1"
 }
 
 ### Récupérer le contexte créé
@@ -54,7 +55,8 @@ Content-Type: application/json
       "source": "http-client",
       "status": "updated"
     }
-  }
+  },
+  "id": "update-1"
 }
 
 ### Vérifier la mise à jour
@@ -76,43 +78,55 @@ Content-Type: application/json
   "params": {
     "key": "",
     "value": null
-  }
+  },
+  "id": "invalid-1"
 }
 
 ### Tests batch
-### Opération batch valide
+### Format standard MCP pour les opérations batch :
+### - jsonrpc: "2.0" (requis)
+### - method: "context/batch" (requis)
+### - params.operations: array d'opérations (requis)
+### - id: identifiant unique de la requête batch (requis)
+### Chaque opération dans le tableau doit avoir :
+### - key: string non vide (requis)
+### - value: any valid JSON (requis)
+### - metadata: object (optionnel)
 POST http://localhost:3000/context/batch
 Content-Type: application/json
 
 {
   "jsonrpc": "2.0",
   "method": "context/batch",
-  "params": [
-    {
-      "key": "batch1",
-      "value": {
-        "index": 1,
-        "data": "Premier élément"
+  "params": {
+    "operations": [
+      {
+        "key": "batch1",
+        "value": {
+          "index": 1,
+          "data": "Premier élément"
+        },
+        "metadata": {
+          "type": "batch-test",
+          "timestamp": "2025-04-21T12:00:00Z",
+          "index": 1
+        }
       },
-      "metadata": {
-        "type": "batch-test",
-        "timestamp": "2025-04-21T12:00:00Z",
-        "index": 1
+      {
+        "key": "batch2",
+        "value": {
+          "index": 2,
+          "data": "Deuxième élément"
+        },
+        "metadata": {
+          "type": "batch-test",
+          "timestamp": "2025-04-21T12:00:00Z",
+          "index": 2
+        }
       }
-    },
-    {
-      "key": "batch2",
-      "value": {
-        "index": 2,
-        "data": "Deuxième élément"
-      },
-      "metadata": {
-        "type": "batch-test",
-        "timestamp": "2025-04-21T12:00:00Z",
-        "index": 2
-      }
-    }
-  ]
+    ]
+  },
+  "id": "batch-1"
 }
 
 ### Vérifier les résultats batch

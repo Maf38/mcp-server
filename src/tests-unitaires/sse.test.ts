@@ -119,7 +119,9 @@ describe('SSE Tests', () => {
             .send({
               jsonrpc: '2.0',
               method: 'context/batch',
-              params: batchData,
+              params: {
+                operations: batchData
+              },
               id: '1'
             });
           

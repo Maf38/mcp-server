@@ -1,6 +1,6 @@
 import request from 'supertest';
 import express, { Express } from 'express';
-import { contextSchema, batchRequestSchema } from '../schemas';
+import { mcpContextSchema, mcpBatchRequestSchema } from '../schemas';
 
 // Routes à tester
 import { getCapabilities } from '../routes/capabilities';

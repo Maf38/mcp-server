@@ -1,4 +1,4 @@
-import { contextSchema } from '../schemas';
+import { mcpContextSchema } from '../schemas';
 import { z } from 'zod';
 
 export interface ValidationResult {
@@ -8,7 +8,7 @@ export interface ValidationResult {
 
 export function validateContext(context: unknown): ValidationResult {
   try {
-    contextSchema.parse(context);
+    mcpContextSchema.parse(context);
     return { success: true };
   } catch (error) {
     if (error instanceof z.ZodError) {

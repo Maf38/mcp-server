@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import { contextSchema } from '../schemas';
+import { mcpContextSchema } from '../schemas';
 
 export function validateContext(context: unknown) {
-  return contextSchema.safeParse(context);
+  return mcpContextSchema.safeParse(context);
 }
 
 export function serializeMetadata(metadata: unknown) {

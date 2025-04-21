@@ -91,7 +91,9 @@ describe('MCP Server API Tests', () => {
       .send({
         jsonrpc: '2.0',
         method: 'context/batch',
-        params: batchData,
+        params: {
+          operations: batchData
+        },
         id: '2'
       });
     expect(response.status).toBe(201);
@@ -233,7 +235,9 @@ describe('MCP Server API Tests', () => {
       .send({
         jsonrpc: '2.0',
         method: 'context/batch',
-        params: [testData],
+        params: {
+          operations: [testData]
+        },
         id: '7'
       });
 

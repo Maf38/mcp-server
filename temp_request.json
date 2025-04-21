@@ -1,0 +1,33 @@
+{
+  "jsonrpc": "2.0",
+  "method": "context/batch",
+  "params": {
+    "operations": [
+      {
+        "key": "batch1",
+        "value": {
+          "index": 1,
+          "data": "Premier element"
+        },
+        "metadata": {
+          "type": "batch-test",
+          "timestamp": "2025-04-21T12:00:00Z",
+          "index": 1
+        }
+      },
+      {
+        "key": "batch2",
+        "value": {
+          "index": 2,
+          "data": "Deuxieme element"
+        },
+        "metadata": {
+          "type": "batch-test",
+          "timestamp": "2025-04-21T12:00:00Z",
+          "index": 2
+        }
+      }
+    ]
+  },
+  "id": "batch-1"
+} 
