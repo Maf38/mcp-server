@@ -1,0 +1,12 @@
+{
+    "accessibility.voice.speechLanguage": "fr-FR",
+    "git.autofetch": true,
+    "git.enableSmartCommit": true,
+    "terminal.integrated.enableMultiLinePasteWarning": "never",
+    "git.confirmSync": false,
+    "projectManager.git.baseFolders": [
+        "L:\\workspace\\ifft-trading-ai"
+    ],
+    "files.autoSave": "afterDelay",    "makefile.configureOnOpen": true,    "github.copilot.advanced": {},
+    
+}

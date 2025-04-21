@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import bodyParser from 'body-parser';
+import cors from 'cors';
 import { z } from 'zod';
 import dotenv from 'dotenv';
 import { contentTypeMiddleware } from './middleware/content-type';
@@ -8,162 +9,190 @@ import { getCapabilities } from './routes/capabilities';
 import { healthCheck } from './routes/health';
 import { initializeDatabase } from './config/database';
 import { Database } from 'sqlite';
+import { createContextLogger } from './utils/logger';
+import { createMCPMessage, createMCPResponse, createMCPError } from './types/mcp';
 
-// Charger les variables d'environnement
+// Configuration
 dotenv.config();
-
 const PORT = process.env.PORT || 3000;
 const DB_PATH = process.env.DB_PATH || '/app/data/context.db';
 
+// Logger
+const logger = createContextLogger('MCP Server');
+
 // Initialisation de l'application Express
 const app = express();
-
-// Middleware pour parser les requêtes JSON
+app.use(cors());
 app.use(bodyParser.json());
-
-// Middleware pour définir le type de contenu MCP
 app.use(contentTypeMiddleware);
 
 let db: Database;
+const sseClients = new Set<Response>();
 
-// Route pour les capacités du serveur (MCP)
+// Routes
 app.get('/capabilities', getCapabilities);
+app.get('/health', healthCheck);
+
+// Route SSE
+app.get('/sse', async (req: Request, res: Response) => {
+  logger.info('Nouvelle connexion SSE reçue');
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  
+  const client = res;
+  sseClients.add(client);
+  
+  req.on('close', () => {
+    logger.info('Client SSE déconnecté');
+    sseClients.delete(client);
+  });
+});
 
 // Route pour sauvegarder le contexte
 app.post('/context', async (req: Request, res: Response) => {
-  console.log('[MCP Server] POST /context - Nouvelle requête reçue:', req.body.key);
+  logger.info('POST /context - Nouvelle requête reçue', { key: req.body.key });
   try {
     const validatedData = contextSchema.parse(req.body);
     const { key, value, metadata } = validatedData;
-    console.log(`[MCP Server] Sauvegarde du contexte - Clé: ${key}`);
+    logger.debug('Sauvegarde du contexte', { key, metadata });
 
     await db.run(
       'INSERT OR REPLACE INTO context (key, value, metadata) VALUES (?, ?, ?)',
       [key, value, JSON.stringify(metadata || {})]
     );
-    console.log(`[MCP Server] Contexte sauvegardé avec succès - Clé: ${key}`);
+    logger.info('Contexte sauvegardé avec succès', { key });
     
-    res.status(201).json({ 
-      message: 'Context saved successfully',
-      data: { key, value, metadata }
+    // Notification SSE
+    const notification = createMCPMessage('context/update', { key, value, metadata });
+    sseClients.forEach(client => {
+      try {
+        client.write(`data: ${JSON.stringify(notification)}\n\n`);
+      } catch (err) {
+        const error = err as Error;
+        logger.error('Erreur lors de la notification SSE', { 
+          errorMessage: error.message, 
+          key 
+        });
+      }
     });
-  } catch (error) {
+
+    res.status(201).json(createMCPResponse({ key, value, metadata }));
+  } catch (err) {
+    const error = err as Error;
     if (error instanceof z.ZodError) {
-      console.error('[MCP Server] Erreur de validation:', error.errors);
-      res.status(400).json({ error: 'Validation error', details: error.errors });
+      logger.warn('Erreur de validation', { errors: error.errors });
+      res.status(400).json(createMCPError(400, 'Validation error', error.errors));
     } else {
-      console.error('[MCP Server] Erreur de base de données:', error);
-      res.status(500).json({ error: 'Failed to save context' });
+      logger.error('Erreur de base de données', { 
+        errorMessage: error.message 
+      });
+      res.status(500).json(createMCPError(500, 'Failed to save context'));
     }
   }
 });
 
 // Route pour les opérations batch
 app.post('/context/batch', async (req: Request, res: Response) => {
-  console.log('[MCP Server] POST /context/batch - Nouvelle requête batch reçue');
+  logger.info('POST /context/batch - Nouvelle requête batch reçue');
   try {
     const batch = batchRequestSchema.parse(req.body);
-    console.log(`[MCP Server] Traitement batch - ${batch.length} éléments`);
+    logger.info('Traitement batch', { count: batch.length });
     
     const results = [];
     await db.run('BEGIN TRANSACTION');
     
     for (const item of batch) {
       try {
-        console.log(`[MCP Server] Traitement élément batch - Clé: ${item.key}`);
+        logger.debug('Traitement élément batch', { key: item.key });
         await db.run(
           'INSERT OR REPLACE INTO context (key, value, metadata) VALUES (?, ?, ?)',
           [item.key, item.value, JSON.stringify(item.metadata || {})]
         );
-        results.push({ key: item.key, status: 'success' });
-      } catch (error) {
-        console.error(`[MCP Server] Erreur pour la clé ${item.key}:`, error);
-        results.push({ key: item.key, status: 'error', error: String(error) });
+        
+        // Notification SSE
+        const notification = createMCPMessage('context/update', {
+          key: item.key,
+          value: item.value,
+          metadata: item.metadata
+        });
+        sseClients.forEach(client => {
+          client.write(`data: ${JSON.stringify(notification)}\n\n`);
+        });
+        
+        results.push({ 
+          key: item.key, 
+          status: 'success'
+        });
+      } catch (err) {
+        const error = err as Error;
+        logger.error('Erreur batch pour une clé', { 
+          key: item.key, 
+          errorMessage: error.message 
+        });
+        results.push({ 
+          key: item.key, 
+          status: 'error', 
+          error: error.message
+        });
       }
     }
     
     await db.run('COMMIT');
-    console.log('[MCP Server] Opération batch terminée avec succès');
-    res.json({ results });
-  } catch (error) {
+    logger.info('Opération batch terminée', { 
+      total: batch.length, 
+      success: results.filter(r => r.status === 'success').length 
+    });
+    
+    res.json(createMCPResponse({
+      operations: results,
+      stats: {
+        total: batch.length,
+        success: results.filter(r => r.status === 'success').length
+      }
+    }));
+  } catch (err) {
+    const error = err as Error;
+    await db.run('ROLLBACK');
     if (error instanceof z.ZodError) {
-      res.status(400).json({ error: 'Validation error', details: error.errors });
+      logger.warn('Erreur de validation batch', { errors: error.errors });
+      res.status(400).json(createMCPError(400, 'Validation error', error.errors));
     } else {
-      console.error('Batch operation error:', error);
-      res.status(500).json({ error: 'Failed to process batch operation' });
-    }
-  }
-});
-
-// Route pour récupérer le contexte
-app.get('/context/:key', async (req: Request, res: Response) => {
-  const { key } = req.params;
-  console.log(`[MCP Server] GET /context/${key} - Récupération de contexte`);
-  try {
-    const result = await db.get('SELECT value, metadata FROM context WHERE key = ?', [key]);
-    
-    if (result) {
-      console.log(`[MCP Server] Contexte trouvé - Clé: ${key}`);
-      const metadata = JSON.parse(result.metadata || '{}');
-      res.json({ 
-        key, 
-        value: result.value,
-        metadata
+      logger.error('Erreur opération batch', { 
+        errorMessage: error.message 
       });
-    } else {
-      console.log(`[MCP Server] Contexte non trouvé - Clé: ${key}`);
-      res.status(404).json({ error: 'Context not found' });
+      res.status(500).json(createMCPError(500, 'Failed to process batch operation'));
     }
-  } catch (error) {
-    console.error('[MCP Server] Erreur lors de la récupération:', error);
-    res.status(500).json({ error: 'Failed to retrieve context' });
   }
 });
-
-// Route pour supprimer un contexte
-app.delete('/context/:key', async (req: Request, res: Response) => {
-  try {
-    const { key } = req.params;
-    const result = await db.run('DELETE FROM context WHERE key = ?', [key]);
-    
-    if (result && result.changes && result.changes > 0) {
-      res.json({ message: 'Context deleted successfully' });
-    } else {
-      res.status(404).json({ error: 'Context not found' });
-    }
-  } catch (error) {
-    console.error('Database error:', error);
-    res.status(500).json({ error: 'Failed to delete context' });
-  }
-});
-
-// Health check endpoint
-app.get('/health', healthCheck);
 
 // Initialisation du serveur
 export async function initServer(testDb?: Database) {
   try {
-    console.log('[MCP Server] Démarrage du serveur...');
+    logger.info('Démarrage du serveur...');
     if (testDb) {
-      console.log('[MCP Server] Utilisation de la base de test');
+      logger.debug('Utilisation de la base de test');
       db = testDb;
     } else {
-      console.log(`[MCP Server] Initialisation de la base de données: ${DB_PATH}`);
+      logger.info('Initialisation de la base de données', { path: DB_PATH });
       db = await initializeDatabase(DB_PATH);
     }
-    console.log('[MCP Server] Base de données initialisée avec succès');
+    logger.info('Base de données initialisée avec succès');
     return app;
-  } catch (error) {
-    console.error('[MCP Server] Erreur lors de l\'initialisation de la base de données:', error);
+  } catch (err) {
+    const error = err as Error;
+    logger.error('Erreur lors de l\'initialisation de la base de données', {
+      errorMessage: error.message
+    });
     throw error;
   }
-};
+}
 
-// Démarrage du serveur uniquement si exécuté directement
+// Démarrage du serveur
 if (require.main === module) {
   initServer().then(app => {
     app.listen(PORT, () => {
-      console.log(`MCP Server is running on http://localhost:${PORT}`);
+      logger.info(`MCP Server démarré sur http://localhost:${PORT}`);
     });
   });
 }

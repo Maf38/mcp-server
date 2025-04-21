@@ -22,6 +22,8 @@ FROM node:18-slim
 # Configuration des logs pour Docker
 ENV NODE_OPTIONS="--enable-source-maps"
 ENV NPM_CONFIG_LOGLEVEL="info"
+ENV NODE_ENV="docker"
+ENV LOG_LEVEL="info"
 
 WORKDIR /app
 
@@ -40,6 +42,5 @@ RUN mkdir -p /app/data
 # Exposer le port 3000
 EXPOSE 3000
 
-# Démarrer l'application avec le mode de logs non bufferisé
-ENV NODE_ENV=production
+# Démarrer l'application
 CMD ["node", "--unhandled-rejections=strict", "dist/index.js"]

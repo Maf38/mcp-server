@@ -26,7 +26,7 @@ describe('MCP Server API Tests', () => {
   };
 
   let score = 0;
-  const totalTests = 10;
+  const totalTests = 16;
 
   test('1. GET /capabilities devrait retourner les capacités du serveur MCP', async () => {
     const response = await request(app).get('/capabilities');
@@ -109,6 +109,87 @@ describe('MCP Server API Tests', () => {
       .send(testData);
     expect(response.status).toBe(201);
     expect(response.body.data.metadata).toMatchObject(testData.metadata);
+    score++;
+  });
+
+  test('11. Le serveur devrait gérer les mises à jour en temps réel', async () => {
+    const response = await request(app)
+      .post('/context')
+      .send({
+        key: 'realtime-test',
+        value: 'test-value',
+        metadata: {
+          type: 'realtime',
+          timestamp: new Date().toISOString()
+        }
+      });
+    expect(response.status).toBe(201);
+    score++;
+  });
+
+  test('12. Le serveur devrait supporter l\'authentification MCP', async () => {
+    const response = await request(app)
+      .post('/context')
+      .set('Authorization', 'Bearer test-token')
+      .send(testData);
+    expect(response.status).toBe(201);
+    score++;
+  });
+
+  test('13. Les limites de taille devraient être respectées', async () => {
+    const largeValue = 'a'.repeat(1024 * 1024 + 1); // Plus grand que maxValueSize
+    const response = await request(app)
+      .post('/context')
+      .send({
+        key: 'large-value-test',
+        value: largeValue
+      });
+    expect(response.status).toBe(400);
+    score++;
+  });
+
+  test('14. Les réponses devraient suivre le format JSON-RPC 2.0', async () => {
+    const response = await request(app)
+      .post('/context')
+      .send(testData);
+    
+    expect(response.status).toBe(201);
+    expect(response.body).toHaveProperty('jsonrpc', '2.0');
+    expect(response.body).toHaveProperty('result');
+    expect(response.body.result).toHaveProperty('_meta');
+    expect(response.body.result._meta).toHaveProperty('timestamp');
+    score++;
+  });
+
+  test('15. Les erreurs devraient suivre le format JSON-RPC 2.0', async () => {
+    const response = await request(app)
+      .get('/context/nonexistent');
+    
+    expect(response.status).toBe(404);
+    expect(response.body).toHaveProperty('jsonrpc', '2.0');
+    expect(response.body).toHaveProperty('error');
+    expect(response.body.error).toHaveProperty('code', 404);
+    expect(response.body.error).toHaveProperty('message');
+    score++;
+  });
+
+  test('16. Les opérations batch devraient notifier les clients SSE', async () => {
+    const messages: any[] = [];
+    const sse = await request(app)
+      .get('/sse')
+      .set('Accept', 'text/event-stream');
+    
+    // Simuler la réception de messages SSE
+    sse.on('message', (msg: any) => messages.push(JSON.parse(msg)));
+
+    const batchResponse = await request(app)
+      .post('/context/batch')
+      .send([testData]);
+
+    expect(batchResponse.status).toBe(200);
+    expect(messages.length).toBeGreaterThan(0);
+    expect(messages[0]).toHaveProperty('jsonrpc', '2.0');
+    expect(messages[0]).toHaveProperty('method', 'context/update');
     score++;
   });
 

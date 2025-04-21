@@ -31,3 +31,6 @@ Thumbs.db
 # Logs
 logs/
 *.log
+mcp-server-*.log
+mcp-server-error-*.log
+*.log.gz
