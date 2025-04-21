@@ -16,6 +16,10 @@ describe('SSE Tests', () => {
     server = app.listen(3001);
   });
 
+  beforeEach(async () => {
+    await db.exec('DELETE FROM contexts');
+  });
+
   afterAll((done) => {
     server.close(done);
   });
@@ -74,6 +78,7 @@ describe('SSE Tests', () => {
     ];
 
     let messageCount = 0;
+    let hasError = false;
 
     es.onopen = async () => {
       try {
@@ -83,20 +88,35 @@ describe('SSE Tests', () => {
         
         expect(response.status).toBe(200);
       } catch (error) {
+        hasError = true;
+        es.close();
         done(error);
       }
     };
 
     es.onmessage = (event: MessageEvent) => {
-      const data = JSON.parse(event.data);
-      expect(data.jsonrpc).toBe('2.0');
-      expect(data.method).toBe('context/update');
-      expect(data.params._meta).toBeDefined();
-      
-      messageCount++;
-      if (messageCount === batchData.length) {
+      try {
+        const data = JSON.parse(event.data);
+        expect(data.jsonrpc).toBe('2.0');
+        expect(data.method).toBe('context/update');
+        expect(data.params._meta).toBeDefined();
+        
+        messageCount++;
+        if (messageCount === batchData.length) {
+          es.close();
+          done();
+        }
+      } catch (error) {
+        hasError = true;
         es.close();
-        done();
+        done(error);
+      }
+    };
+
+    es.onerror = (error: Error) => {
+      if (!hasError) {
+        es.close();
+        done(error);
       }
     };
   });

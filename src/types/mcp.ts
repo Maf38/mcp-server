@@ -4,6 +4,7 @@ export type MCPMessage = JSONRPCMessage;
 
 export interface MCPResponse {
   jsonrpc: "2.0";
+  id: string | number | null;
   result?: {
     [key: string]: unknown;
     _meta?: {
@@ -33,9 +34,10 @@ export function createMCPMessage(method: string, params?: Record<string, unknown
 }
 
 // Helper pour créer une réponse MCP valide
-export function createMCPResponse(result: Record<string, unknown>): MCPResponse {
+export function createMCPResponse(result: Record<string, unknown>, id: string | number | null = null): MCPResponse {
   return {
     jsonrpc: "2.0",
+    id,
     result: {
       ...result,
       _meta: {
@@ -46,9 +48,10 @@ export function createMCPResponse(result: Record<string, unknown>): MCPResponse 
 }
 
 // Helper pour créer une réponse d'erreur MCP
-export function createMCPError(code: number, message: string, data?: unknown): MCPResponse {
+export function createMCPError(code: number, message: string, id: string | number | null = null, data?: unknown): MCPResponse {
   return {
     jsonrpc: "2.0",
+    id,
     error: {
       code,
       message,

@@ -1,77 +1,225 @@
+require('dotenv').config();
 const axios = require('axios');
+const assert = require('assert').strict;
 
-const API_URL = 'http://192.168.1.187:3000';
+const API_URL = process.env.API_URL || 'http://localhost:3000';
+const TIMEOUT = 5000; // 5 secondes
+
+// Configuration d'axios avec timeout
+const api = axios.create({
+  baseURL: API_URL,
+  timeout: TIMEOUT,
+  validateStatus: null, // Ne pas rejeter les réponses HTTP, même avec des codes d'erreur
+  headers: {
+    'Content-Type': 'application/json'
+  }
+});
 
 async function testProduction() {
+  const results = {
+    passed: 0,
+    failed: 0,
+    total: 0
+  };
+
+  async function runTest(name, testFn) {
+    results.total++;
+    try {
+      console.log(`\n🔄 ${name}...`);
+      await testFn();
+      console.log(`✅ ${name} : Succès`);
+      results.passed++;
+    } catch (error) {
+      console.error(`❌ ${name} : Échec`);
+      console.error('   Erreur:', error.message);
+      if (error.response) {
+        console.error('   Status:', error.response.status);
+        console.error('   Détails:', JSON.stringify(error.response.data, null, 2));
+      }
+      results.failed++;
+    }
+  }
+
   try {
     // 1. Test de santé
-    console.log('1. Test du health check...');
-    const health = await axios.get(`${API_URL}/health`);
-    console.log('✓ Serveur en ligne:', health.data);
+    await runTest('Test du health check', async () => {
+      const { data } = await api.get('/health');
+      assert.ok(data.status === 'ok', 'Le statut devrait être "ok"');
+      assert.ok(data.timestamp, 'Un timestamp devrait être présent');
+    });
 
     // 2. Test des capacités
-    console.log('\n2. Vérification des capacités du serveur...');
-    const capabilities = await axios.get(`${API_URL}/capabilities`);
-    console.log('✓ Capacités du serveur:', capabilities.data);
+    await runTest('Test des capacités', async () => {
+      const { data } = await api.get('/capabilities');
+      assert.ok(data.jsonrpc === '2.0', 'Version JSON-RPC incorrecte');
+      assert.ok(data.result, 'Résultat manquant');
+      assert.ok(data.result.version, 'Version manquante');
+      assert.ok(data.result.features, 'Features manquantes');
+      assert.ok(data.result.features.batch === true, 'Support batch manquant');
+      assert.ok(data.result.features.metadata === true, 'Support metadata manquant');
+      assert.ok(data.result.features.sse === true, 'Support SSE manquant');
+    });
 
-    // 3. Test d'écriture/lecture simple
-    console.log('\n3. Test d\'écriture et lecture...');
+    // 3. Test de validation
+    await runTest('Test de validation des données', async () => {
+      const { data, status } = await api.post('/context', {
+        jsonrpc: "2.0",
+        method: "context/create",
+        params: {
+          key: '',
+          value: null
+        }
+      });
+      assert.strictEqual(status, 400);
+      assert.strictEqual(data.jsonrpc, '2.0');
+      assert.ok(data.error);
+      assert.strictEqual(data.error.code, 400);
+      assert.strictEqual(data.error.message, 'Validation error');
+    });
+
+    // 4. Test CRUD simple
     const testContext = {
-      key: 'ide-test',
-      value: 'Configuration de test IDE',
+      key: 'test-crud',
+      value: { message: 'Test value' },
       metadata: {
-        type: 'configuration',
-        environment: 'production',
+        type: 'test',
+        environment: 'ci',
         timestamp: new Date().toISOString()
       }
     };
 
-    console.log('   Écriture du contexte...');
-    const createResponse = await axios.post(`${API_URL}/context`, testContext);
-    console.log('✓ Contexte créé:', createResponse.data);
+    await runTest('Test création de contexte', async () => {
+      const { data, status } = await api.post('/context', {
+        jsonrpc: "2.0",
+        method: "context/create",
+        params: testContext
+      });
+      assert.strictEqual(status, 201);
+      assert.strictEqual(data.jsonrpc, '2.0');
+      assert.ok(data.result, 'Résultat manquant');
+      assert.strictEqual(data.result.key, testContext.key);
+      assert.deepStrictEqual(data.result.value, testContext.value);
+      assert.deepStrictEqual(data.result.metadata, testContext.metadata);
+    });
 
-    console.log('   Lecture du contexte...');
-    const readResponse = await axios.get(`${API_URL}/context/${testContext.key}`);
-    console.log('✓ Contexte lu:', readResponse.data);
+    await runTest('Test lecture de contexte', async () => {
+      const { data } = await api.get(`/context/${testContext.key}`);
+      assert.strictEqual(data.jsonrpc, '2.0');
+      assert.ok(data.result, 'Résultat manquant');
+      assert.strictEqual(data.result.key, testContext.key);
+      assert.deepStrictEqual(data.result.value, testContext.value);
+      assert.deepStrictEqual(data.result.metadata, testContext.metadata);
+    });
 
-    // 4. Test d'opération batch
-    console.log('\n4. Test d\'opération batch...');
+    await runTest('Test mise à jour de contexte', async () => {
+      const updatedContext = {
+        ...testContext,
+        value: { message: 'Updated value' },
+        metadata: {
+          ...testContext.metadata,
+          updated: true
+        }
+      };
+      const { data } = await api.post('/context', {
+        jsonrpc: "2.0",
+        method: "context/update",
+        params: updatedContext
+      });
+      assert.strictEqual(data.jsonrpc, '2.0');
+      assert.ok(data.result, 'Résultat manquant');
+      assert.strictEqual(data.result.key, updatedContext.key);
+      assert.deepStrictEqual(data.result.value, updatedContext.value);
+      assert.deepStrictEqual(data.result.metadata, updatedContext.metadata);
+
+      const { data: readData } = await api.get(`/context/${testContext.key}`);
+      assert.strictEqual(readData.jsonrpc, '2.0');
+      assert.ok(readData.result, 'Résultat manquant');
+      assert.deepStrictEqual(readData.result.value, updatedContext.value);
+      assert.ok(readData.result.metadata.updated);
+    });
+
+    // 5. Test opération batch
     const batchData = [
       {
-        key: 'config-1',
-        value: 'Configuration 1',
-        metadata: { type: 'config', priority: 'high' }
+        key: 'batch-1',
+        value: { index: 1 },
+        metadata: { type: 'batch', index: 1 }
       },
       {
-        key: 'config-2',
-        value: 'Configuration 2',
-        metadata: { type: 'config', priority: 'medium' }
+        key: 'batch-2',
+        value: { index: 2 },
+        metadata: { type: 'batch', index: 2 }
       }
     ];
 
-    const batchResponse = await axios.post(`${API_URL}/context/batch`, batchData);
-    console.log('✓ Opération batch réussie:', batchResponse.data);
-
-    // 5. Test de suppression
-    console.log('\n5. Test de suppression...');
-    const deleteResponse = await axios.delete(`${API_URL}/context/${testContext.key}`);
-    console.log('✓ Suppression réussie:', deleteResponse.data);
-
-    // Vérification finale
-    try {
-      await axios.get(`${API_URL}/context/${testContext.key}`);
-    } catch (error) {
-      if (error.response && error.response.status === 404) {
-        console.log('✓ Vérification de suppression: Le contexte a bien été supprimé');
+    await runTest('Test opération batch', async () => {
+      const { data } = await api.post('/context/batch', {
+        jsonrpc: "2.0",
+        method: "context/batch",
+        params: batchData
+      });
+      assert.strictEqual(data.jsonrpc, '2.0');
+      assert.ok(data.result, 'Résultat manquant');
+      assert.ok(Array.isArray(data.result.results), 'Le résultat devrait contenir un tableau de résultats');
+      assert.strictEqual(data.result.results.length, batchData.length);
+      assert.ok(data.result._meta, 'Métadonnées manquantes');
+      assert.strictEqual(data.result._meta.operation, 'batch');
+      
+      // Vérification de chaque élément
+      for (const item of batchData) {
+        const { data: readData } = await api.get(`/context/${item.key}`);
+        assert.strictEqual(readData.jsonrpc, '2.0');
+        assert.ok(readData.result, 'Résultat manquant');
+        assert.strictEqual(readData.result.key, item.key);
+        assert.deepStrictEqual(readData.result.value, item.value);
+        assert.deepStrictEqual(readData.result.metadata, item.metadata);
       }
+    });
+
+    // 6. Test clé inexistante
+    await runTest('Test lecture clé inexistante', async () => {
+      const { data, status } = await api.get('/context/cle-qui-nexiste-pas');
+      assert.strictEqual(status, 404);
+      assert.strictEqual(data.jsonrpc, '2.0');
+      assert.ok(data.error);
+      assert.strictEqual(data.error.code, 404);
+      assert.strictEqual(data.error.message, 'Context not found');
+    });
+
+    // Nettoyage
+    await runTest('Nettoyage des données de test', async () => {
+      const keysToDelete = [testContext.key, ...batchData.map(item => item.key)];
+      for (const key of keysToDelete) {
+        const { data } = await api.delete(`/context/${key}`);
+        assert.strictEqual(data.jsonrpc, '2.0');
+        assert.ok(data.result);
+        assert.strictEqual(data.result.key, key);
+        assert.ok(data.result._meta);
+        assert.strictEqual(data.result._meta.operation, 'delete');
+
+        const { data: checkData, status: checkStatus } = await api.get(`/context/${key}`);
+        assert.strictEqual(checkStatus, 404);
+        assert.strictEqual(checkData.jsonrpc, '2.0');
+        assert.ok(checkData.error);
+        assert.strictEqual(checkData.error.code, 404);
+        assert.strictEqual(checkData.error.message, 'Context not found');
+      }
+    });
+
+  } finally {
+    // Affichage du résumé
+    console.log('\n📊 Résumé des tests:');
+    console.log(`   Total: ${results.total}`);
+    console.log(`   Réussis: ${results.passed} ✅`);
+    console.log(`   Échoués: ${results.failed} ❌`);
+    
+    if (results.failed > 0) {
+      console.error('\n❌ Certains tests ont échoué');
+      process.exit(1);
+    } else {
+      console.log('\n✅ Tous les tests ont réussi !');
+      process.exit(0);
     }
-
-    console.log('\n✅ Tous les tests ont réussi ! Le serveur est prêt pour la production.');
-
-  } catch (error) {
-    console.error('\n❌ Erreur pendant les tests:', error.response ? error.response.data : error.message);
-    console.error('Status:', error.response ? error.response.status : 'N/A');
-    process.exit(1);
   }
 }
 

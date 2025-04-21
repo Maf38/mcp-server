@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "method": "context/create",
+  "params": {
+    "key": "test-debug",
+    "value": {
+      "message": "test"
+    },
+    "metadata": {
+      "type": "debug"
+    }
+  }
+} 

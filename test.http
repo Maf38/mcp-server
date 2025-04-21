@@ -1,57 +1,136 @@
+### Tests de base
+### Vérifier la santé du serveur
+GET http://localhost:3000/health
+Accept: application/json
+
 ### Vérifier les capacités du serveur
 GET http://localhost:3000/capabilities
+Accept: application/json
 
-### Sauvegarder un contexte avec métadonnées
+### Tests de contexte simple
+### Créer un nouveau contexte
 POST http://localhost:3000/context
 Content-Type: application/json
 
 {
-  "key": "exampleKey",
-  "value": "exampleValue",
-  "metadata": {
-    "type": "configuration",
-    "timestamp": "2025-04-20T12:00:00Z",
-    "source": "test"
+  "jsonrpc": "2.0",
+  "method": "context/create",
+  "params": {
+    "key": "test-key",
+    "value": {
+      "message": "Test message",
+      "priority": "high",
+      "tags": ["test", "example"]
+    },
+    "metadata": {
+      "type": "test",
+      "timestamp": "2025-04-21T12:00:00Z",
+      "source": "http-client"
+    }
   }
 }
 
-### Opération batch
-POST http://localhost:3000/context/batch
-Content-Type: application/json
+### Récupérer le contexte créé
+GET http://localhost:3000/context/test-key
+Accept: application/json
 
-[
-  {
-    "key": "batch1",
-    "value": "value1",
-    "metadata": {
-      "type": "test",
-      "timestamp": "2025-04-20T12:00:00Z"
-    }
-  },
-  {
-    "key": "batch2",
-    "value": "value2",
-    "metadata": {
-      "type": "test",
-      "timestamp": "2025-04-20T12:00:00Z"
-    }
-  }
-]
-
-### Récupérer un contexte
-GET http://localhost:3000/context/exampleKey
-
-### Mettre à jour un contexte existant
+### Mettre à jour le contexte
 POST http://localhost:3000/context
 Content-Type: application/json
 
 {
-  "key": "exampleKey",
-  "value": "nouvelleValeur"
+  "jsonrpc": "2.0",
+  "method": "context/update",
+  "params": {
+    "key": "test-key",
+    "value": {
+      "message": "Message mis à jour",
+      "priority": "medium",
+      "tags": ["test", "example", "updated"]
+    },
+    "metadata": {
+      "type": "test",
+      "timestamp": "2025-04-21T12:01:00Z",
+      "source": "http-client",
+      "status": "updated"
+    }
+  }
 }
 
 ### Vérifier la mise à jour
-GET http://localhost:3000/context/exampleKey
+GET http://localhost:3000/context/test-key
+Accept: application/json
 
+### Tests d'erreur
 ### Tester une clé inexistante
-GET http://localhost:3000/context/cleInexistante
+GET http://localhost:3000/context/cle-inexistante
+Accept: application/json
+
+### Tester une validation invalide
+POST http://localhost:3000/context
+Content-Type: application/json
+
+{
+  "jsonrpc": "2.0",
+  "method": "context/create",
+  "params": {
+    "key": "",
+    "value": null
+  }
+}
+
+### Tests batch
+### Opération batch valide
+POST http://localhost:3000/context/batch
+Content-Type: application/json
+
+{
+  "jsonrpc": "2.0",
+  "method": "context/batch",
+  "params": [
+    {
+      "key": "batch1",
+      "value": {
+        "index": 1,
+        "data": "Premier élément"
+      },
+      "metadata": {
+        "type": "batch-test",
+        "timestamp": "2025-04-21T12:00:00Z",
+        "index": 1
+      }
+    },
+    {
+      "key": "batch2",
+      "value": {
+        "index": 2,
+        "data": "Deuxième élément"
+      },
+      "metadata": {
+        "type": "batch-test",
+        "timestamp": "2025-04-21T12:00:00Z",
+        "index": 2
+      }
+    }
+  ]
+}
+
+### Vérifier les résultats batch
+GET http://localhost:3000/context/batch1
+Accept: application/json
+
+###
+GET http://localhost:3000/context/batch2
+Accept: application/json
+
+### Supprimer un contexte
+DELETE http://localhost:3000/context/test-key
+Accept: application/json
+
+### Vérifier la suppression
+GET http://localhost:3000/context/test-key
+Accept: application/json
+
+### Test SSE
+GET http://localhost:3000/sse
+Accept: text/event-stream

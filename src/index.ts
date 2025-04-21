@@ -11,6 +11,9 @@ import { initializeDatabase } from './config/database';
 import { Database } from 'sqlite';
 import { createContextLogger } from './utils/logger';
 import { createMCPMessage, createMCPResponse, createMCPError } from './types/mcp';
+import { initDatabase } from './database';
+import { errorHandler } from './middleware/error';
+import { validateContext } from './utils/validation';
 
 // Configuration
 dotenv.config();
@@ -29,6 +32,46 @@ app.use(contentTypeMiddleware);
 let db: Database;
 const sseClients = new Set<Response>();
 
+app.use((req: Request, res: Response, next) => {
+  const originalJson = res.json;
+  res.json = function(data: any) {
+    if (req.path === '/health') {
+      return originalJson.call(this, data);
+    }
+    
+    const requestId = req.body?.id || req.headers['x-request-id'] || null;
+    
+    if (data.error) {
+      return originalJson.call(this, {
+        jsonrpc: "2.0",
+        error: {
+          code: data.error.code || 500,
+          message: data.error.message || "Internal Server Error",
+          data: data.error.data
+        },
+        id: requestId
+      });
+    }
+    
+    if (data.jsonrpc === "2.0") {
+      return originalJson.call(this, data);
+    }
+    
+    return originalJson.call(this, {
+      jsonrpc: "2.0",
+      result: {
+        ...data,
+        _meta: {
+          timestamp: new Date().toISOString(),
+          operation: req.method === 'DELETE' ? 'delete' : undefined
+        }
+      },
+      id: requestId
+    });
+  };
+  next();
+});
+
 // Routes
 app.get('/capabilities', getCapabilities);
 app.get('/health', healthCheck);
@@ -36,135 +79,291 @@ app.get('/health', healthCheck);
 // Route SSE
 app.get('/sse', async (req: Request, res: Response) => {
   logger.info('Nouvelle connexion SSE reçue');
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
   
+  // Configuration des en-têtes SSE
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  });
+  
+  // Envoyer un message initial pour confirmer la connexion
+  const connectionMessage = createMCPMessage('connection/established', {
+    timestamp: new Date().toISOString(),
+    status: 'connected'
+  });
+  res.write(`data: ${JSON.stringify(connectionMessage)}\n\n`);
+  
+  // Ajouter le client à la liste
   const client = res;
   sseClients.add(client);
   
-  req.on('close', () => {
+  // Gérer la fermeture de connexion
+  const cleanup = () => {
     logger.info('Client SSE déconnecté');
     sseClients.delete(client);
-  });
+  };
+  
+  req.on('close', cleanup);
+  req.on('error', cleanup);
+  
+  // Garder la connexion en vie avec un ping toutes les 30 secondes
+  const keepAlive = setInterval(() => {
+    try {
+      const pingMessage = createMCPMessage('connection/ping', {
+        timestamp: new Date().toISOString()
+      });
+      client.write(`data: ${JSON.stringify(pingMessage)}\n\n`);
+    } catch (err) {
+      clearInterval(keepAlive);
+      cleanup();
+    }
+  }, 30000);
+  
+  // Nettoyer l'intervalle à la fermeture
+  req.on('close', () => clearInterval(keepAlive));
+});
+
+// Route pour récupérer un contexte
+app.get('/context/:key', async (req: Request, res: Response) => {
+  const requestId = req.headers['x-request-id'] || null;
+  const key = req.params.key;
+  console.log(`GET /context/${key} - Request ID:`, requestId);
+
+  try {
+    const row = await db.get('SELECT * FROM contexts WHERE key = ?', [key]);
+    console.log('Database result:', row);
+
+    if (!row) {
+      return res.status(404).json({
+        jsonrpc: "2.0",
+        error: {
+          code: 404,
+          message: 'Context not found'
+        },
+        id: requestId
+      });
+    }
+
+    // Parser la valeur et les métadonnées stockées
+    const value = JSON.parse(row.value);
+    const metadata = row.metadata ? JSON.parse(row.metadata) : undefined;
+
+    const response = {
+      jsonrpc: "2.0",
+      result: {
+        key: row.key,
+        value,
+        metadata,
+        _meta: {
+          timestamp: new Date().toISOString()
+        }
+      },
+      id: requestId
+    };
+    console.log('Response:', JSON.stringify(response, null, 2));
+
+    res.json(response);
+  } catch (error) {
+    console.error('Error details:', error);
+    res.status(500).json({
+      jsonrpc: "2.0",
+      error: {
+        code: 500,
+        message: 'Internal server error',
+        details: error instanceof Error ? error.message : String(error)
+      },
+      id: requestId
+    });
+  }
 });
 
 // Route pour sauvegarder le contexte
 app.post('/context', async (req: Request, res: Response) => {
-  logger.info('POST /context - Nouvelle requête reçue', { key: req.body.key });
+  const requestId = req.body?.id || req.headers['x-request-id'] || null;
+  console.log('POST /context - Request ID:', requestId);
+
   try {
-    const validatedData = contextSchema.parse(req.body);
-    const { key, value, metadata } = validatedData;
-    logger.debug('Sauvegarde du contexte', { key, metadata });
-
-    await db.run(
-      'INSERT OR REPLACE INTO context (key, value, metadata) VALUES (?, ?, ?)',
-      [key, value, JSON.stringify(metadata || {})]
-    );
-    logger.info('Contexte sauvegardé avec succès', { key });
-    
-    // Notification SSE
-    const notification = createMCPMessage('context/update', { key, value, metadata });
-    sseClients.forEach(client => {
-      try {
-        client.write(`data: ${JSON.stringify(notification)}\n\n`);
-      } catch (err) {
-        const error = err as Error;
-        logger.error('Erreur lors de la notification SSE', { 
-          errorMessage: error.message, 
-          key 
-        });
-      }
-    });
-
-    res.status(201).json(createMCPResponse({ key, value, metadata }));
-  } catch (err) {
-    const error = err as Error;
-    if (error instanceof z.ZodError) {
-      logger.warn('Erreur de validation', { errors: error.errors });
-      res.status(400).json(createMCPError(400, 'Validation error', error.errors));
-    } else {
-      logger.error('Erreur de base de données', { 
-        errorMessage: error.message 
+    const contextData = req.body?.params || req.body;
+    const validation = contextSchema.safeParse(contextData);
+    if (!validation.success) {
+      const errorIssues = validation.error.issues.map(issue => issue.message).join(', ');
+      logger.warn('Erreur de validation', { errors: errorIssues });
+      return res.status(400).json({
+        jsonrpc: "2.0",
+        error: {
+          code: 400,
+          message: 'Validation error',
+          data: errorIssues
+        },
+        id: requestId
       });
-      res.status(500).json(createMCPError(500, 'Failed to save context'));
     }
+
+    const validatedData = validation.data;
+    const { key, value, metadata } = validatedData;
+    const isUpdate = req.body?.method === 'context/update';
+    
+    // Vérifier si le contexte existe déjà
+    const existingRow = await db.get('SELECT key FROM contexts WHERE key = ?', [key]);
+    if (existingRow && !isUpdate) {
+      return res.status(409).json({
+        jsonrpc: "2.0",
+        error: {
+          code: 409,
+          message: `Context already exists for key: ${key}`,
+          details: 'Use PUT method to update existing context'
+        },
+        id: requestId
+      });
+    }
+
+    // Insérer ou mettre à jour le contexte
+    await db.run(
+      'INSERT OR REPLACE INTO contexts (key, value, metadata) VALUES (?, ?, ?)',
+      [key, typeof value === 'string' ? value : JSON.stringify(value), metadata ? JSON.stringify(metadata) : null]
+    );
+    console.log(`Context ${isUpdate ? 'updated' : 'created'} successfully: ${key}`);
+
+    res.status(isUpdate ? 200 : 201).json({
+      jsonrpc: "2.0",
+      result: {
+        key,
+        value,
+        metadata,
+        _meta: {
+          timestamp: new Date().toISOString(),
+          operation: isUpdate ? 'update' : undefined
+        }
+      },
+      id: requestId
+    });
+  } catch (error) {
+    console.error('Error details:', error);
+    res.status(500).json({
+      jsonrpc: "2.0",
+      error: {
+        code: 500,
+        message: 'Internal server error',
+        details: error instanceof Error ? error.message : String(error)
+      },
+      id: requestId
+    });
+  }
+});
+
+// Route pour supprimer un contexte
+app.delete('/context/:key', async (req: Request, res: Response) => {
+  const requestId = req.headers['x-request-id'] || null;
+  const key = req.params.key;
+  console.log(`DELETE /context/${key} - Request ID:`, requestId);
+
+  try {
+    // Vérifier si le contexte existe avant de le supprimer
+    const existingRow = await db.get('SELECT key FROM contexts WHERE key = ?', [key]);
+    if (!existingRow) {
+      return res.status(404).json({
+        jsonrpc: "2.0",
+        error: {
+          code: 404,
+          message: `Context not found for key: ${key}`
+        },
+        id: requestId
+      });
+    }
+
+    await db.run('DELETE FROM contexts WHERE key = ?', [key]);
+    console.log(`Context deleted successfully: ${key}`);
+
+    res.json({
+      jsonrpc: "2.0",
+      result: {
+        key,
+        _meta: {
+          timestamp: new Date().toISOString(),
+          operation: 'delete'
+        }
+      },
+      id: requestId
+    });
+  } catch (error) {
+    console.error('Error details:', error);
+    res.status(500).json({
+      jsonrpc: "2.0",
+      error: {
+        code: 500,
+        message: 'Internal server error',
+        details: error instanceof Error ? error.message : String(error)
+      },
+      id: requestId
+    });
   }
 });
 
 // Route pour les opérations batch
 app.post('/context/batch', async (req: Request, res: Response) => {
-  logger.info('POST /context/batch - Nouvelle requête batch reçue');
+  const requestId = req.body?.id || req.headers['x-request-id'] || null;
   try {
-    const batch = batchRequestSchema.parse(req.body);
-    logger.info('Traitement batch', { count: batch.length });
-    
-    const results = [];
-    await db.run('BEGIN TRANSACTION');
-    
-    for (const item of batch) {
-      try {
-        logger.debug('Traitement élément batch', { key: item.key });
-        await db.run(
-          'INSERT OR REPLACE INTO context (key, value, metadata) VALUES (?, ?, ?)',
-          [item.key, item.value, JSON.stringify(item.metadata || {})]
-        );
-        
-        // Notification SSE
-        const notification = createMCPMessage('context/update', {
-          key: item.key,
-          value: item.value,
-          metadata: item.metadata
-        });
-        sseClients.forEach(client => {
-          client.write(`data: ${JSON.stringify(notification)}\n\n`);
-        });
-        
-        results.push({ 
-          key: item.key, 
-          status: 'success'
-        });
-      } catch (err) {
-        const error = err as Error;
-        logger.error('Erreur batch pour une clé', { 
-          key: item.key, 
-          errorMessage: error.message 
-        });
-        results.push({ 
-          key: item.key, 
-          status: 'error', 
-          error: error.message
-        });
-      }
-    }
-    
-    await db.run('COMMIT');
-    logger.info('Opération batch terminée', { 
-      total: batch.length, 
-      success: results.filter(r => r.status === 'success').length 
-    });
-    
-    res.json(createMCPResponse({
-      operations: results,
-      stats: {
-        total: batch.length,
-        success: results.filter(r => r.status === 'success').length
-      }
-    }));
-  } catch (err) {
-    const error = err as Error;
-    await db.run('ROLLBACK');
-    if (error instanceof z.ZodError) {
-      logger.warn('Erreur de validation batch', { errors: error.errors });
-      res.status(400).json(createMCPError(400, 'Validation error', error.errors));
-    } else {
-      logger.error('Erreur opération batch', { 
-        errorMessage: error.message 
+    const operations = req.body?.params || [];
+    const result = batchRequestSchema.safeParse(operations);
+    if (!result.success) {
+      return res.status(400).json({
+        jsonrpc: "2.0",
+        error: {
+          code: 400,
+          message: 'Validation error',
+          data: result.error.errors
+        },
+        id: requestId
       });
-      res.status(500).json(createMCPError(500, 'Failed to process batch operation'));
     }
+
+    const validatedOperations = result.data;
+    const results = [];
+
+    await db.run('BEGIN TRANSACTION');
+    try {
+      for (const op of validatedOperations) {
+        const { key, value, metadata } = op;
+        await db.run(
+          'INSERT OR REPLACE INTO contexts (key, value, metadata) VALUES (?, ?, ?)',
+          [key, typeof value === 'string' ? value : JSON.stringify(value), metadata ? JSON.stringify(metadata) : null]
+        );
+        results.push({ key, value, metadata });
+      }
+      await db.run('COMMIT');
+    } catch (error) {
+      await db.run('ROLLBACK');
+      throw error;
+    }
+
+    res.status(201).json({
+      jsonrpc: "2.0",
+      result: {
+        results,
+        _meta: {
+          timestamp: new Date().toISOString(),
+          operation: 'batch'
+        }
+      },
+      id: requestId
+    });
+  } catch (error) {
+    console.error('Error processing batch operation:', error);
+    res.status(500).json({
+      jsonrpc: "2.0",
+      error: {
+        code: 500,
+        message: 'Internal server error'
+      },
+      id: requestId
+    });
   }
 });
+
+// Middleware de gestion des erreurs
+app.use(errorHandler);
 
 // Initialisation du serveur
 export async function initServer(testDb?: Database) {

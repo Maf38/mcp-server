@@ -1,16 +1,19 @@
 import { Request, Response } from 'express';
+import { createMCPResponse } from '../types/mcp';
 
-export const getCapabilities = (req: Request, res: Response) => {
-  res.json({
-    version: '1.0',
+export function getCapabilities(req: Request, res: Response) {
+  const requestId = Array.isArray(req.headers['x-request-id']) 
+    ? req.headers['x-request-id'][0] 
+    : (req.headers['x-request-id'] || null);
+    
+  const capabilities = {
+    version: '1.0.0',
     features: {
       batch: true,
-      delete: true,
-      metadata: true
-    },
-    limits: {
-      maxBatchSize: 100,
-      maxValueSize: 1024 * 1024 // 1MB
+      metadata: true,
+      sse: true
     }
-  });
-};
+  };
+
+  res.json(createMCPResponse(capabilities, requestId));
+}
