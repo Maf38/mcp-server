@@ -40,19 +40,32 @@ export const notificationSchema = z.object({
   })
 }).strict();
 
-// 2. Schémas pour les requêtes MCP standard
-export const mcpContextSchema = z.object({
-  key: z.string().min(1, "La clé ne peut pas être vide"),
-  value: jsonValue,
-  metadata: z.record(jsonValue).optional()
-});
-
-export const mcpRequestSchema = z.object({
+// 2. Schémas pour les messages MCP (requêtes avec réponse attendue)
+export const mcpMessageSchema = z.object({
   jsonrpc: z.literal("2.0"),
   method: z.enum(["context/create", "context/update", "context/delete"]),
-  params: mcpContextSchema,
-  id: z.union([z.string(), z.number()])
+  params: z.object({
+    key: z.string().min(1, "La clé ne peut pas être vide"),
+    value: jsonValue,
+    metadata: z.record(jsonValue).optional()
+  }),
+  id: z.union([z.string(), z.number()]) // id obligatoire pour les messages
 }).strict();
+
+// Schéma pour les notifications MCP (sans réponse attendue)
+export const mcpNotificationSchema = z.object({
+  jsonrpc: z.literal("2.0"),
+  method: z.enum(["context/create", "context/update", "context/delete"]),
+  params: z.object({
+    key: z.string().min(1, "La clé ne peut pas être vide"),
+    value: jsonValue,
+    metadata: z.record(jsonValue).optional()
+  })
+  // pas d'id pour les notifications
+}).strict();
+
+// Schéma unifié pour les requêtes (message ou notification)
+export const mcpRequestSchema = z.union([mcpMessageSchema, mcpNotificationSchema]);
 
 // 3. Schémas pour les opérations batch MCP
 export const mcpBatchOperationSchema = z.object({

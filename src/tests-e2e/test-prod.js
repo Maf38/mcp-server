@@ -93,7 +93,8 @@ async function testProduction() {
       const { data, status } = await api.post('/context', {
         jsonrpc: "2.0",
         method: "context/create",
-        params: testContext
+        params: testContext,
+        id: "test-create"
       });
       assert.strictEqual(status, 201);
       assert.strictEqual(data.jsonrpc, '2.0');
@@ -124,7 +125,8 @@ async function testProduction() {
       const { data } = await api.post('/context', {
         jsonrpc: "2.0",
         method: "context/update",
-        params: updatedContext
+        params: updatedContext,
+        id: "test-update"
       });
       assert.strictEqual(data.jsonrpc, '2.0');
       assert.ok(data.result, 'Résultat manquant');

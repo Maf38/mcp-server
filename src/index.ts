@@ -182,7 +182,6 @@ app.get('/context/:key', async (req: Request, res: Response) => {
 
 // Route pour sauvegarder le contexte
 app.post('/context', async (req: Request, res: Response) => {
-  const requestId = req.body?.id ?? req.headers['x-request-id']?.toString() ?? null;
   logger.info('POST /context - Nouvelle requête reçue', req.body);
 
   try {
@@ -190,11 +189,13 @@ app.post('/context', async (req: Request, res: Response) => {
     const validation = mcpRequestSchema.safeParse(req.body);
     if (!validation.success) {
       logger.warn('Erreur de validation', { errors: validation.error.issues });
-      return res.status(400).json(createMCPError(400, 'Validation error', requestId, validation.error.issues));
+      return res.status(400).json(createMCPError(400, 'Validation error', null, validation.error.issues));
     }
 
-    const { key, value, metadata } = validation.data.params;
-    const isUpdate = req.body.method === 'context/update';
+    const { method, params } = validation.data;
+    const { key, value, metadata } = params;
+    const isUpdate = method === 'context/update';
+    const requestId = 'id' in validation.data ? validation.data.id : null;
 
     // Insérer ou mettre à jour le contexte
     await db.run(
@@ -202,13 +203,20 @@ app.post('/context', async (req: Request, res: Response) => {
       [key, JSON.stringify(value), metadata ? JSON.stringify(metadata) : null]
     );
 
-    // Envoyer la réponse
+    // Si c'est une notification (pas d'id), on renvoie 204 No Content
+    if (!requestId) {
+      res.status(204).end();
+      return;
+    }
+
+    // Sinon on envoie une réponse complète
     res.status(isUpdate ? 200 : 201).json(createMCPResponse({
       key,
       value,
       metadata,
       _meta: {
-        operation: isUpdate ? 'update' : 'create'
+        operation: isUpdate ? 'update' : 'create',
+        timestamp: new Date().toISOString()
       }
     }, requestId));
 
