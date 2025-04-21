@@ -2,17 +2,15 @@ import EventSource from 'eventsource';
 
 console.log('Démarrage du test SSE...');
 
-const es = new EventSource('http://localhost:3000/sse');
+const es = new (EventSource as any)('http://localhost:3000/sse');
 
-es.onopen = () => {
-  console.log('Connexion SSE établie');
+console.log('Connexion SSE établie');
+
+es.onmessage = (event: MessageEvent) => {
+  console.log('Message reçu:', event.data);
 };
 
-es.onmessage = (event) => {
-  console.log('Message reçu:', JSON.parse(event.data));
-};
-
-es.onerror = (error) => {
+es.onerror = (error: Event) => {
   console.error('Erreur SSE:', error);
 };
 
@@ -42,4 +40,7 @@ setTimeout(() => {
   console.log('Fermeture de la connexion SSE');
   es.close();
   process.exit(0);
-}, 10000); 
+}, 10000);
+
+// Garder le processus en vie
+setInterval(() => {}, 1000); 

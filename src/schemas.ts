@@ -1,7 +1,5 @@
 import { z } from 'zod';
-
-// Type pour les valeurs JSON valides
-type JSONValue = string | number | boolean | null | JSONValue[] | { [key: string]: JSONValue };
+import type { JSONValue } from './types/json';
 
 // Schéma récursif pour les valeurs JSON
 const jsonValue: z.ZodType<JSONValue> = z.lazy(() => 
@@ -14,6 +12,14 @@ const jsonValue: z.ZodType<JSONValue> = z.lazy(() =>
     z.record(jsonValue)
   ])
 );
+
+// Schéma pour une requête JSON-RPC 2.0
+export const jsonRpcRequestSchema = z.object({
+  jsonrpc: z.literal('2.0'),
+  method: z.enum(['context/create', 'context/update', 'context/delete', 'context/batch']),
+  params: z.lazy(() => contextSchema),
+  id: z.union([z.string(), z.number(), z.null()]).optional()
+});
 
 // Schémas de validation MCP
 export const contextSchema = z.object({
