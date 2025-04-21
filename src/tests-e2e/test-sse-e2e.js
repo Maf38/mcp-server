@@ -10,7 +10,7 @@ const api = axios.create({
   baseURL: API_URL,
   timeout: TIMEOUT,
   headers: {
-    'Content-Type': 'application/json+model-context'
+    'Content-Type': 'application/json'
   }
 });
 
@@ -85,7 +85,7 @@ async function testSSE() {
           const message = JSON.parse(event.data);
           assert.strictEqual(message.jsonrpc, '2.0', 'Version JSON-RPC incorrecte');
           assert.strictEqual(message.method, 'connection/established', 'Méthode incorrecte');
-          assert.ok(message.params.timestamp, 'Timestamp manquant');
+          assert.ok(message.params._meta.timestamp, 'Timestamp manquant');
           assert.strictEqual(message.params.status, 'connected', 'Statut incorrect');
           es.close();
           resolve();
@@ -115,7 +115,7 @@ async function testSSE() {
             assert.strictEqual(message.jsonrpc, '2.0', 'Version JSON-RPC incorrecte');
             assert.strictEqual(message.params.key, 'test-sse', 'Clé incorrecte');
             assert.deepStrictEqual(
-              JSON.parse(message.params.value),
+              message.params.value,
               { message: 'Test SSE' },
               'Valeur incorrecte'
             );
@@ -140,7 +140,7 @@ async function testSSE() {
           method: 'context/create',
           params: {
             key: 'test-sse',
-            value: JSON.stringify({ message: 'Test SSE' }),
+            value: { message: 'Test SSE' },
             metadata: { type: 'sse-test', timestamp: new Date().toISOString() }
           },
           id: 1
