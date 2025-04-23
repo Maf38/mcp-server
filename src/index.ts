@@ -7,6 +7,7 @@ import { healthCheck } from './routes/health';
 import { Database } from 'sqlite';
 import { createContextLogger } from './utils/logger';
 import { createMCPNotification, createMCPResponse, createMCPError } from './types/mcp';
+import { open } from 'sqlite';
 import { initializeDatabase } from './config/database';
 
 // Configuration
@@ -34,6 +35,35 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 let db: Database;
 const sseClients = new Set<Response>();
+
+// Initialisation de la base de données
+(async () => {
+  try {
+    logger.info('Initialisation de la base de données', { path: DB_PATH });
+    db = await open({
+      filename: DB_PATH,
+      driver: require('sqlite3').Database
+    });
+    
+    // Création ou mise à jour du schéma de la base de données
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS contexts (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL CHECK(json_valid(value)),
+        metadata TEXT CHECK(metadata IS NULL OR json_valid(metadata)),
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_contexts_updated_at ON contexts(updated_at);
+    `);
+    
+    logger.info('Base de données initialisée avec succès');
+  } catch (error) {
+    logger.error('Erreur lors de l\'initialisation de la base de données', { error });
+    process.exit(1);
+  }
+})();
 
 app.use((req: Request, res: Response, next) => {
   const originalJson = res.json;
@@ -246,10 +276,9 @@ app.post('/context', async (req: Request, res: Response) => {
       logger.warn('Erreur de validation de la notification SSE', { errors: notifValidation.error.issues });
     }
 
-  } catch (error) {
-    logger.error('Erreur lors de la sauvegarde du contexte', { error });
+  } catch (error) {    logger.error('Erreur lors de la sauvegarde du contexte', { error });
     res.status(500).json(
-      createMCPError(500, 'Internal server error', requestId,
+      createMCPError(500, 'Internal server error', '', // Removed requestId as it's not needed
         error instanceof Error ? error.message : String(error)
       )
     );

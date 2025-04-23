@@ -1,5 +1,5 @@
-import { mcpContextSchema } from '../schemas';
 import { z } from 'zod';
+import { mcpRequestSchema, mcpBatchRequestSchema, notificationSchema } from '../schemas';
 
 export interface ValidationResult {
   success: boolean;
@@ -8,8 +8,23 @@ export interface ValidationResult {
 
 export function validateContext(context: unknown): ValidationResult {
   try {
-    mcpContextSchema.parse(context);
-    return { success: true };
+    // First try to validate as a standard MCP request
+    const result = mcpRequestSchema.safeParse(context);
+    if (result.success) {
+      return { success: true };
+    }
+
+    // If that fails, try as a batch request
+    const batchResult = mcpBatchRequestSchema.safeParse(context);
+    if (batchResult.success) {
+      return { success: true };
+    }
+
+    // If both fail, return the error from the standard validation
+    return {
+      success: false,
+      error: result.error
+    };
   } catch (error) {
     if (error instanceof z.ZodError) {
       return {
@@ -20,10 +35,10 @@ export function validateContext(context: unknown): ValidationResult {
     return {
       success: false,
       error: new z.ZodError([{
-        code: z.ZodIssueCode.custom,
+        code: 'custom',
         path: [],
-        message: 'Erreur de validation inattendue'
+        message: 'Invalid request format'
       }])
     };
   }
-} 
+}

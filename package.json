@@ -8,7 +8,7 @@
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "test": "jest --verbose",
     "test:e2e": "node src/tests-e2e/test-prod.js",
-    "test:sse": "node src/tests-e2e/test-sse.js"
+    "test:sse": "node src/tests-e2e/test-sse-e2e.js"
   },
   "keywords": [],
   "author": "",

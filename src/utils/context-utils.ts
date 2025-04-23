@@ -1,8 +1,12 @@
 import { z } from 'zod';
-import { mcpContextSchema } from '../schemas';
 
 export function validateContext(context: unknown) {
-  return mcpContextSchema.safeParse(context);
+  try {
+    JSON.parse(JSON.stringify(context));
+    return { success: true };
+  } catch (error) {
+    return { success: false, error };
+  }
 }
 
 export function serializeMetadata(metadata: unknown) {
@@ -11,4 +15,4 @@ export function serializeMetadata(metadata: unknown) {
 
 export function parseMetadata(metadata: string | null) {
   return metadata ? JSON.parse(metadata) : undefined;
-} 
+}
